@@ -2,8 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"fproxy/src"
 	"io"
 	"log"
 	"net"
@@ -12,12 +12,12 @@ import (
 )
 
 func main() {
-	ip, err := src.ExternalIP()
+	ip, err := ExternalIP()
 	if err != nil {
 		fmt.Println(err)
 	}
 	// tcp 连接，监听 8080 端口
-	l, err := net.Listen("tcp", ":8001")
+	l, err := net.ListenTCP("tcp4", &net.TCPAddr{Port: 80})
 	if err != nil {
 		log.Panic(err)
 	}
@@ -91,4 +91,52 @@ func handle(client net.Conn) {
 	//将客户端的请求转发至服务端，将服务端的响应转发给客户端。io.Copy 为阻塞函数，文件描述符不关闭就不停止
 	go io.Copy(server, client)
 	io.Copy(client, server)
+}
+
+// 获取ip
+func ExternalIP() (net.IP, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue // interface down
+		}
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue // loopback interface
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return nil, err
+		}
+		for _, addr := range addrs {
+			ip := getIpFromAddr(addr)
+			if ip == nil {
+				continue
+			}
+			return ip, nil
+		}
+	}
+	return nil, errors.New("connected to the network?")
+}
+
+// 获取ip
+func getIpFromAddr(addr net.Addr) net.IP {
+	var ip net.IP
+	switch v := addr.(type) {
+	case *net.IPNet:
+		ip = v.IP
+	case *net.IPAddr:
+		ip = v.IP
+	}
+	if ip == nil || ip.IsLoopback() {
+		return nil
+	}
+	ip = ip.To4()
+	if ip == nil {
+		return nil // not an ipv4 address
+	}
+
+	return ip
 }
