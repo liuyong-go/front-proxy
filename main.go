@@ -11,6 +11,12 @@ import (
 	"strings"
 )
 
+var fobbidenIp = []string{
+	"127.0.0.1",
+	"0.0.0.0",
+	"117.72.66.215",
+}
+
 func main() {
 	ip, err := ExternalIP()
 	if err != nil {
@@ -29,7 +35,6 @@ func main() {
 		if err != nil {
 			log.Panic(err)
 		}
-
 		go handle(client)
 	}
 }
@@ -70,6 +75,13 @@ func handle(client net.Conn) {
 			address = hostPortURL.Host + ":80"
 		}
 	}
+	for _, host := range fobbidenIp {
+		if hostPortURL.Host == host {
+			log.Println("fobbidenIp", address)
+			return
+		}
+	}
+
 	//if strings.Contains(address, "weixin") {
 	fmt.Println("n value", n)
 	fmt.Println(string(b[:n]))

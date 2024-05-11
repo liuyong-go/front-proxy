@@ -11,7 +11,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Hello, World! This is the home page.")
 }
 
-func main() {
+func main1() {
 	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{Port: 80})
 	if err != nil {
 		log.Fatal(err)
