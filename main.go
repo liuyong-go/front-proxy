@@ -14,7 +14,6 @@ import (
 var fobbidenIp = []string{
 	"127.0.0.1",
 	"0.0.0.0",
-	"117.72.66.215",
 }
 
 func main() {
@@ -27,7 +26,7 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
-	fmt.Println("start listen ", ip.String(), ":", 8001, "...")
+	fmt.Println("start listen ", ip.String(), ":", 80, "...")
 
 	// 死循环，每当遇到连接时，调用 handle
 	for {
@@ -74,7 +73,12 @@ func handle(client net.Conn) {
 		if strings.Index(hostPortURL.Host, ":") == -1 { //host 不带端口， 默认 80
 			address = hostPortURL.Host + ":80"
 		}
+		if hostPortURL.Host == "" {
+			log.Println("fobbidenIp", address)
+			return
+		}
 	}
+
 	for _, host := range fobbidenIp {
 		if hostPortURL.Host == host {
 			log.Println("fobbidenIp", address)
