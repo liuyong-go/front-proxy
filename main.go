@@ -1,20 +1,25 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"net/url"
-	"strings"
+	"net/http"
 )
+
+const setPath = "/liuyongproxy"
+const username = "liuyong"
+const passwrod = "12345678"
 
 var fobbidenIp = []string{
 	"127.0.0.1",
 	"0.0.0.0",
+	"117.72.66.215",
 }
+var allowIp []string
 
 func main() {
 	ip, err := ExternalIP()
@@ -37,76 +42,124 @@ func main() {
 		go handle(client)
 	}
 }
+func setWhiteIp() (err error) {
+	ip, err := ExternalIP()
+	if err != nil {
+		return
+	}
+	if len(allowIp) > 5 {
+		allowIp = []string{}
+	}
+	allowIp = append(allowIp, ip.String())
+	fmt.Println("set ip success", allowIp, ip.String())
+	return
+}
+func checkWhiteIp() (pass bool, ipvalue string, err error) {
+
+	ip, err := ExternalIP()
+	if err != nil {
+		return
+	}
+	ipvalue = ip.String()
+	for _, v := range allowIp {
+		if v == ipvalue {
+			pass = true
+			return
+		}
+	}
+	return
+}
 
 func handle(client net.Conn) {
 	if client == nil {
 		return
 	}
 	defer client.Close()
-
-	//log.Printf("remote addr: %v\n", client.RemoteAddr())
-
-	// 用来存放客户端数据的缓冲区
-	var b [86400]byte
-	//从客户端获取数据
-	n, err := client.Read(b[:])
+	reader := bufio.NewReader(client)
+	request, err := http.ReadRequest(reader)
 	if err != nil {
-		log.Println(err)
 		return
 	}
 
-	var method, URL, address string
-	// 从客户端数据读入 method，url
-	fmt.Sscanf(string(b[:bytes.IndexByte(b[:], '\n')]), "%s%s", &method, &URL)
-	hostPortURL, err := url.Parse(URL)
+	// 创建新的请求对象
+	newRequest := &http.Request{
+		Method: request.Method,
+		URL:    request.URL,
+		Header: make(http.Header),
+	}
+	if request.URL.Path == setPath {
+		values := request.URL.Query()
+		if values.Get("username") == username && values.Get("password") == passwrod {
+			err = setWhiteIp()
+			if err != nil {
+				fmt.Println("setWhiteIp err:", err)
+			}
+		}
+		return
+	}
+	//检测ip白名单
+	pass, ip, err := checkWhiteIp()
 	if err != nil {
-		log.Println(err)
+		fmt.Println("checkWhiteIp err:", err)
+		return
+	}
+	if !pass {
+		fmt.Println("checkWhiteIp fail,ip:", ip)
+		return
+	}
+	fmt.Println("white list ", allowIp)
+	fmt.Println("checkWhiteIp pass,ip:", ip)
+
+	// 确保URL是绝对的，这里简单示例未做转换，实际可能需要更复杂的处理逻辑
+	if newRequest.URL.Scheme == "" || newRequest.URL.Host == "" {
+		fmt.Println("scheme,host 不能为空", err)
 		return
 	}
 
-	// 如果方法是 CONNECT，则为 https 协议
-	if method == "CONNECT" {
-		address = hostPortURL.Scheme + ":" + hostPortURL.Opaque
-	} else { //否则为 http 协议
-		address = hostPortURL.Host
-		// 如果 host 不带端口，则默认为 80
-		if strings.Index(hostPortURL.Host, ":") == -1 { //host 不带端口， 默认 80
-			address = hostPortURL.Host + ":80"
-		}
-		if hostPortURL.Host == "" {
-			log.Println("fobbidenIp", address)
-			return
+	// 复制头部信息，注意过滤掉特定头部
+	for key, values := range request.Header {
+		if key != "Authorization" && key != "Transfer-Encoding" && key != "Content-Length" {
+			for _, value := range values {
+				newRequest.Header.Add(key, value)
+			}
 		}
 	}
 
-	for _, host := range fobbidenIp {
-		if hostPortURL.Host == host {
-			log.Println("fobbidenIp", address)
-			return
-		}
-	}
-
-	//if strings.Contains(address, "weixin") {
-	fmt.Println("n value", n)
-	fmt.Println(string(b[:n]))
-	fmt.Println("address", address, method)
-	//}
-	//获得了请求的 host 和 port，向服务端发起 tcp 连接
-	server, err := net.Dial("tcp", address)
+	// 发送请求并处理响应
+	resp, err := http.DefaultTransport.RoundTrip(newRequest)
 	if err != nil {
-		log.Println(err)
+		log.Println("转发请求时出错:", err)
 		return
 	}
-	//如果使用 https 协议，需先向客户端表示连接建立完毕
-	if method == "CONNECT" {
-		fmt.Fprint(client, "HTTP/1.1 200 Connection established\r\n\r\n")
-	} else { //如果使用 http 协议，需将从客户端得到的 http 请求转发给服务端
-		server.Write(b[:n])
+	defer resp.Body.Close()
+
+	// 写入响应状态行
+	statusLine := fmt.Sprintf("HTTP/1.1 %d %s\r\n", resp.StatusCode, http.StatusText(resp.StatusCode))
+	if _, err := client.Write([]byte(statusLine)); err != nil {
+		log.Println("写入状态行时出错:", err)
+		return
 	}
 
-	//将客户端的请求转发至服务端，将服务端的响应转发给客户端。io.Copy 为阻塞函数，文件描述符不关闭就不停止
-	go io.Copy(server, client)
-	io.Copy(client, server)
+	// 写入响应头
+	for key, values := range resp.Header {
+		for _, value := range values {
+			headerLine := fmt.Sprintf("%s: %s\r\n", key, value)
+			if _, err := client.Write([]byte(headerLine)); err != nil {
+				log.Println("写入响应头时出错:", err)
+				return
+			}
+		}
+	}
+
+	// 写入空行和响应体
+	if _, err := client.Write([]byte("\r\n")); err != nil {
+		log.Println("写入空行时出错:", err)
+		return
+	}
+	if _, err := io.Copy(client, resp.Body); err != nil {
+		log.Println("复制响应体时出错:", err)
+	}
+
 }
 
 // 获取ip
