@@ -44,25 +44,16 @@ func main() {
 		go trasferData(client)
 	}
 }
-func setWhiteIp() (err error) {
-	ip, err := ExternalIP()
-	if err != nil {
-		return
-	}
+func setWhiteIp(ip string) (err error) {
+
 	if len(allowIp) > 5 {
 		allowIp = []string{}
 	}
-	allowIp = append(allowIp, ip.String())
-	fmt.Println("set ip success", allowIp, ip.String())
+	allowIp = append(allowIp, ip)
+	fmt.Println("set ip success", allowIp, ip)
 	return
 }
-func checkWhiteIp() (pass bool, ipvalue string, err error) {
-
-	ip, err := ExternalIP()
-	if err != nil {
-		return
-	}
-	ipvalue = ip.String()
+func checkWhiteIp(ipvalue string) (pass bool, err error) {
 	for _, v := range allowIp {
 		if v == ipvalue {
 			pass = true
@@ -77,6 +68,13 @@ func trasferData(client net.Conn) {
 		return
 	}
 	defer client.Close()
+	addrWithPort := client.RemoteAddr().String()
+	ip, port, err := net.SplitHostPort(addrWithPort)
+	if err != nil {
+		fmt.Println("Error splitting host and port:", err)
+		return
+	}
+	fmt.Println("ip:", ip, port)
 	// 用来存放客户端数据的缓冲区
 	var b [86400]byte
 	//从客户端获取数据
@@ -98,7 +96,7 @@ func trasferData(client net.Conn) {
 	if hostPortURL.Path == setPath {
 		values := hostPortURL.Query()
 		if values.Get("username") == username && values.Get("password") == passwrod {
-			err = setWhiteIp()
+			err = setWhiteIp(ip)
 			if err != nil {
 				fmt.Println("setWhiteIp err:", err)
 			}
@@ -111,7 +109,7 @@ func trasferData(client net.Conn) {
 		return
 	}
 	//检测ip白名单
-	pass, ip, err := checkWhiteIp()
+	pass, err := checkWhiteIp(ip)
 	if err != nil {
 		fmt.Println("checkWhiteIp err:", err)
 		return
